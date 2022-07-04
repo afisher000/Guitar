@@ -1,0 +1,129 @@
+ID,Message
+0,Bank Select
+1,* Modulation wheel
+10,Breath control
+11,Undefined
+100,Foot controller
+101,Portamento time
+110,Data Entry
+111,* Channel Volume (formerly Main Volume)
+1000,Balance
+1001,Undefined
+1010,* Pan
+1011,* Expression Controller
+1100,Effect control 1
+1101,Effect control 2
+1110,Undefined
+1111,Undefined
+10000,General Purpose Controller #1
+10001,General Purpose Controller #2
+10010,General Purpose Controller #3
+10011,General Purpose Controller #4
+10100,Undefined
+10101,Undefined
+10110,Undefined
+10111,Undefined
+11000,Undefined
+11001,Undefined
+11010,Undefined
+11011,Undefined
+11100,Undefined
+11101,Undefined
+11110,Undefined
+11111,Undefined
+100000,Bank Select
+100001,Modulation wheel
+100010,Breath control
+100011,Undefined
+100100,Foot controller
+100101,Portamento time
+100110,Data entry
+100111,Channel Volume (formerly Main Volume)
+101000,Balance
+101001,Undefined
+101010,Pan
+101011,Expression Controller
+101100,Effect control 1
+101101,Effect control 2
+101110,Undefined
+101111,Undefined
+110000,General Purpose Controller #1
+110001,General Purpose Controller #2
+110010,General Purpose Controller #3
+110011,General Purpose Controller #4
+110100,Undefined
+110101,Undefined
+110110,Undefined
+110111,Undefined
+111000,Undefined
+111001,Undefined
+111010,Undefined
+111011,Undefined
+111100,Undefined
+111101,Undefined
+111110,Undefined
+111111,Undefined
+1000000,* Damper pedal on/off (Sustain)
+1000001,Portamento on/off
+1000010,Sustenuto on/off
+1000011,Soft pedal on/off
+1000100,Legato Footswitch
+1000101,Hold 2
+1000110,Sound Controller 1 (Sound Variation)
+1000111,Sound Controller 2 (Timbre)
+1001000,Sound Controller 3 (Release Time)
+1001001,Sound Controller 4 (Attack Time)
+1001010,Sound Controller 5 (Brightness)
+1001011,Sound Controller 6
+1001100,Sound Controller 7
+1001101,Sound Controller 8
+1001110,Sound Controller 9
+1001111,Sound Controller 10
+1010000,General Purpose Controller #5
+1010001,General Purpose Controller #6
+1010010,General Purpose Controller #7
+1010011,General Purpose Controller #8
+1010100,Portamento Control
+1010101,Undefined
+1010110,Undefined
+1010111,Undefined
+1011000,Undefined
+1011001,Undefined
+1011010,Undefined
+1011011,Effects 1 Depth
+1011100,Effects 2 Depth
+1011101,Effects 3 Depth
+1011110,Effects 4 Depth
+1011111,Effects 5 Depth
+1100000,Data entry +1
+1100001,Data entry -1
+1100010,Non-Registered Parameter Number LSB
+1100011,Non-Registered Parameter Number MSB
+1100100,* Registered Parameter Number LSB
+1100101,* Registered Parameter Number MSB
+1100110,Undefined
+1100111,Undefined
+1101000,Undefined
+1101001,Undefined
+1101010,Undefined
+1101011,Undefined
+1101100,Undefined
+1101101,Undefined
+1101110,Undefined
+1101111,Undefined
+1110000,Undefined
+1110001,Undefined
+1110010,Undefined
+1110011,Undefined
+1110100,Undefined
+1110101,Undefined
+1110110,Undefined
+1110111,Undefined
+1111000,All Sound Off
+1111001,* Reset All Controllers
+1111010,Local control on/off
+1111011,* All notes off
+1111100,Omni mode off (+ all notes off)
+1111101,Omni mode on (+ all notes off)
+1111110,Poly mode on/off (+ all notes off)
+1111111,Poly mode on (incl mono=off +all notes off)
