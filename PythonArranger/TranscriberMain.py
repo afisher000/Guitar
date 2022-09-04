@@ -32,17 +32,6 @@ from scipy.interpolate import interp1d
 
 
 
-# Make its own file...
-class Spectrogram():
-    def __init__(self):
-        self.wfac = 0.5
-        self.ofac = 0.5
-        self.Nmin = -4
-        self.Nmax = 40
-        self.tmin = 0
-        self.tspan= 6
-        pass
-
 mw_Ui, mw_Base = uic.loadUiType('load_window.ui')
 class Load_Window(mw_Base, mw_Ui):
     ''' This class controls the "load/create song" window. '''
