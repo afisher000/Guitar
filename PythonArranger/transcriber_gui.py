@@ -6,11 +6,21 @@ Created on Wed Jun 29 19:48:47 2022
 """
 
 import sys
-sys.path.append('C:\\Users\\afisher\\Documents\\GitHub\\Guitar\\PythonArranger\\GUIPackages')
-
+sys.path.append('C:\\Users\\afish\\Documents\\GitHub\\Guitar\\PythonArranger\\GUIPackages')
 import pandas as pd
 import numpy as np
 from Transcriber import Database, Cursor, Tab
+from PyQt5 import QtCore as qtc
+from PyQt5 import QtWidgets as qtw
+from PyQt5 import QtGui as qtg
+from PyQt5.Qt import Qt as qt
+from PyQt5 import uic
+import pyqtgraph as pg
+from sqlalchemy import create_engine
+import sounddevice as sd
+import soundfile as sf
+from scipy.interpolate import interp1d
+
 
 # =============================================================================
 # Add print.py to tab class
@@ -19,62 +29,44 @@ from Transcriber import Database, Cursor, Tab
 # Add a songname label, useful to keep the name around
 # Possibility to rename table?
 # =============================================================================
-from PyQt5 import uic
-from PyQt5 import QtCore as qtc
-from PyQt5 import QtWidgets as qtw
-from PyQt5 import QtGui as qtg
-from PyQt5.Qt import Qt as qt
-import pyqtgraph as pg
-import mysql.connector
-from sqlalchemy import create_engine
-import sounddevice as sd
-import soundfile as sf
-from scipy.interpolate import interp1d
 
-# Make its own file...
-class Spectrogram():
-    def __init__(self):
-        self.wfac = 0.5
-        self.ofac = 0.5
-        self.Nmin = -4
-        self.Nmax = 40
-        self.tmin = 0
-        self.tspan= 6
-        pass
-    
-lw_Ui, lw_Base = uic.loadUiType('load_window.ui')
-class Load_Window(lw_Base, lw_Ui):
+
+
+mw_Ui, mw_Base = uic.loadUiType('load_window.ui')
+class Load_Window(mw_Base, mw_Ui):
     ''' This class controls the "load/create song" window. '''
     def __init__(self, main_window):
         super().__init__()
         self.main_window = main_window
+        self.main_window.hide()
 
         # Load or create song
         self.setupUi(self)
         
         # Load song menu using database tables
         song_tables = self.main_window.db.get_tables()
-        self.song_menu.addItems(song_tables)
+        self.existingSongsComboBox.addItems(song_tables)
         
         # Button functions
-        self.new_song_button.clicked.connect(self.create_song)
-        self.load_song_button.clicked.connect(self.load_song)
+        self.createButton.clicked.connect(self.create_song)
+        self.loadButton.clicked.connect(self.load_song)
         
         
     def load_song(self):
         ''' Load song from the database. '''
         # Get data from table and update notes
-        table_name = self.song_menu.currentText()
+        table_name = self.existingSongsComboBox.currentText()
         if table_name!='':
             self.main_window.load_notes(table_name)
             self.main_window.songname = table_name
+            self.main_window.songNameLineEdit.setText(self.main_window.songname)
             self.main_window.show()
             self.close()
         return
     
     def create_song(self):
         ''' Create a new song. '''
-        songname = self.songname.text().lower().replace(' ','_')
+        songname = self.newSongLineEdit.text().lower().replace(' ','_')
         
         if songname in self.main_window.db.get_tables() or songname=='':
             msg = qtw.QMessageBox()
@@ -83,13 +75,14 @@ class Load_Window(lw_Base, lw_Ui):
         else:
             self.main_window.db.create_table(songname)
             self.main_window.songname = songname
+            self.main_window.songNameLineEdit.setText(songname)
             self.main_window.show()
             self.close()
         return
         
 
 mw_Ui, mw_Base = uic.loadUiType('main_window.ui')
-class Main_Window(mw_Ui, mw_Base):
+class Main_Window(mw_Base, mw_Ui):
     ''' This class controls the main window for transcribing guitar tabs. '''
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -109,9 +102,9 @@ class Main_Window(mw_Ui, mw_Base):
         self.tab.add_staff(self.canvas)
         
         # Initialize Displays
-        self.stepsize_display.setText(f'1/{int(96/self.cursor.step)}')
-        self.playback_bpm = round(float(self.playback_bpm.text()))
-        self.play_tones = self.play_tones_button.isChecked()
+        self.stepsizeLineEdit.setText(f'1/{int(96/self.cursor.step)}')
+        self.playback_bpm = round(float(self.playbackSpeedLineEdit.text()))
+        self.play_tones = self.soundToggleCheckBox.isChecked()
 
         # Add cursor ptr
         self.ptr = pg.TextItem(text='*', anchor=(0.25,0.25), color=self.tab.textitem_color)
@@ -121,14 +114,13 @@ class Main_Window(mw_Ui, mw_Base):
         
         # Connect signals to slots
         self.canvas.scene().sigMouseClicked.connect(self.mouseClickEvent)
-        self.save_button.clicked.connect(self.save_song)
-        self.play_tones_button.stateChanged.connect(self.toggle_sounds)
+        self.saveButton.clicked.connect(self.save_song)
+        self.soundToggleCheckBox.toggled.connect(self.toggle_sounds)
         
 
         # Run Loading window
         self.load_window = Load_Window(self)
         self.load_window.show()
-        self.hide()
         
     
     def playback(self):
@@ -141,7 +133,7 @@ class Main_Window(mw_Ui, mw_Base):
     def toggle_sounds(self):
         ''' Toggle tone sound effects. '''
         print('Toggled sounds')
-        self.play_tones = self.play_tones_button.isChecked()
+        self.play_tones = self.soundToggleCheckBox.isChecked()
         
     def play_note(self, string, fret):
         ''' Play the tone for a given pitch. '''
@@ -178,6 +170,8 @@ class Main_Window(mw_Ui, mw_Base):
         target = self.canvas.plotItem.vb.mapToView(event.pos())
         self.cursor.mousemove(target, self.tab)
         self.ptr.setPos(*self.cursor.get_canvas_coords(self.tab))
+        
+        self.setFocus() # Needed so certain keyPresses work after clicking canvas
         return
         
     def add_note(self, fret, beatdiv=None, string=None):
@@ -198,6 +192,16 @@ class Main_Window(mw_Ui, mw_Base):
         self.notes.loc[len(self.notes)] = [beatdiv, string, fret]
         return
         
+    def redraw(self, notes):
+        for idx in notes.index:
+            beat = notes.loc[idx].beatdiv/self.tab.beatdivs
+            line, x = divmod(beat, self.tab.linebeats)
+            y = notes.loc[idx].string - line*self.tab.linewidth
+            self.textitem_cnt[idx].setPos(x,y)
+        return
+    
+    
+    
     def remove_notes(self, matches):
         ''' Remove notes from the notes dataframe and canvas. '''
         idxs = matches.index.sort_values(ascending=False)
@@ -232,17 +236,29 @@ class Main_Window(mw_Ui, mw_Base):
         cursor_keys = [qt.Key_Left, qt.Key_Right, qt.Key_Down, qt.Key_Up,
                        qt.Key_PageUp, qt.Key_PageDown]
         if signal.key() in cursor_keys:
-            self.cursor.keymove(signal.key(), self.tab)
-            self.ptr.setPos(*self.cursor.get_canvas_coords(self.tab))
+            if signal.modifiers() & qt.ControlModifier:
+                # Shift and redraw later notes
+                cond = self.notes.beatdiv<self.cursor.beatdiv
+                if signal.key()==qt.Key_Left:
+                    self.notes.beatdiv = self.notes.beatdiv.where(cond, self.notes.beatdiv-self.cursor.step)
+                    self.redraw(self.notes[~cond])
 
-            page = self.cursor.beatdiv // self.tab.pagedivs
-            self.set_figure_view(page)
+                if signal.key()==qt.Key_Right:
+                    self.notes.beatdiv = self.notes.beatdiv.where(cond, self.notes.beatdiv+self.cursor.step)
+                    self.redraw(self.notes[~cond])
+            else:
+                # Move cursor
+                self.cursor.keymove(signal.key(), self.tab)
+                self.ptr.setPos(*self.cursor.get_canvas_coords(self.tab))
+    
+                page = self.cursor.beatdiv // self.tab.pagedivs
+                self.set_figure_view(page)
 
 
         # Change stepsize
         if signal.key() in [qt.Key_Minus, qt.Key_Equal]:
             self.cursor.change_stepsize(signal.key())
-            self.stepsize_display.setText(f'1/{int(96/self.cursor.step)}')
+            self.stepsizeLineEdit.setText(f'1/{int(96/self.cursor.step)}')
         
         # Add notes
         if qt.Key_0 <= signal.key() <= qt.Key_9:
@@ -273,7 +289,7 @@ class Main_Window(mw_Ui, mw_Base):
         if signal.key()==qt.Key_C and (signal.modifiers() & qt.ControlModifier):
             measure = self.cursor.beatdiv // self.tab.measuredivs
             beatdiv_min = measure*self.tab.measuredivs
-            beatdiv_max = (measure+self.num_selected_measures.value())*self.tab.measuredivs
+            beatdiv_max = (measure+self.measuresToSelectSpinBox.value())*self.tab.measuredivs
             self.clipboard = self.get_notes({'beatdiv':[beatdiv_min, beatdiv_max]})
         
         # Paste
@@ -281,7 +297,7 @@ class Main_Window(mw_Ui, mw_Base):
             # Remove notes in paste region
             measure = self.cursor.beatdiv // self.tab.measuredivs
             beatdiv_min = measure*self.tab.measuredivs
-            beatdiv_max = (measure+self.num_selected_measures.value())*self.tab.measuredivs
+            beatdiv_max = (measure+self.measuresToSelectSpinBox.value())*self.tab.measuredivs
             matches = self.get_notes({'beatdiv':[beatdiv_min, beatdiv_max]})
             self.remove_notes(matches)
             
@@ -299,6 +315,7 @@ if __name__=='__main__':
     else:
         app = qtw.QApplication.instance()
     w = Main_Window()
-    app.exec_()
+
+    # app.exec_()
 
 
