@@ -85,7 +85,7 @@
     <string>120</string>
    </property>
   </widget>
-  <widget class="QCheckBox" name="play_tones">
+  <widget class="QCheckBox" name="play_tones_button">
    <property name="geometry">
     <rect>
      <x>9</x>
