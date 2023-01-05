@@ -26,12 +26,28 @@ def get_pitch_as_string(pitch, keysig='sharp'):
     return note_string
     
 
-def get_staff_pitch(y, line_sep, line_height, is_bass):
-    # Independent variable is line pixel and dependent variable is staff_pitch
-    slope = -2/line_sep
-    intercept = 6 if is_bass else 18
+def get_pitch(y, line_sep):
+    semitone_mapping = pd.Series(
+        index=range(7),
+        data=[0,2,4,5,7,9,11]
+    )
+    staff_pitch = get_staff_pitch(y, line_sep)
+    pitch = semitone_mapping[staff_pitch%7].values + 12*(staff_pitch//7)
+    return pitch
+    
+def get_staff_pitch(y, line_sep):
+    ''' ASSUMES MARGIN IS 4!!!!'''
+    line_height = 12*line_sep
+    is_treble = (y//line_height)%2==0
     mody = y%line_height
-    staff_pitch = round(slope*mody + intercept)
+    
+    # Apply bass linear fit
+    slope = -2/line_sep
+    intercept = 6
+    staff_pitch = (slope*mody + intercept).astype(int)
+    
+    # Shift up 12 if treble
+    staff_pitch[is_treble] = staff_pitch[is_treble] + 12
     return staff_pitch
 
 

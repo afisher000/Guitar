@@ -21,16 +21,16 @@ data_columns = [
 
 database_files = {
     'filling':'training_data_filling.csv',
-    'nonnotes':'training_data_nonnotes.csv',
+    'notations':'training_data_notations.csv',
     'notes':'training_data_notes.csv'
 }
 
 model_files = { 
     'filling':'model_to_fill_contours.pkl',
-    'nonnotes':'model_to_identify_nonnotes',
-    'notes':'model_to_identify_notes'
+    'notations':'model_to_identify_notations.pkl',
+    'notes':'model_to_identify_notes.pkl'
 }
-nonnote_colors = { 
+notation_colors = { 
         's':(255,0,0), #sharp
         'n':(255,100,100), #natural
         'f':(255,200,200), #flat
@@ -61,10 +61,10 @@ def annotate_contour(img, row, model_type, validation=False):
         if row.state!='\r':
             fill_value = 100 if validation else 0
             cv.floodFill(img, None, (int(row.cx), int(row.cy)), fill_value)
-    elif model_type == 'nonnotes':
+    elif model_type == 'notations':
         if len(img.shape)==2: #Is grayscale
             img = cv.cvtColor(img, cv.COLOR_GRAY2BGR)
-        color = nonnote_colors[row.state]
+        color = notation_colors[row.state]
         cv.circle(img, (int(row.cx), int(row.cy)), radius=15, color=color, thickness=-1)
     elif model_type == 'notes':
         if len(img.shape)==2: #Is grayscale
@@ -105,11 +105,16 @@ def run_model(img, line_sep, model_type, validation=False):
         model = pickle.load(open(model_file, 'rb'))
         X = data[training_columns].values
         data.state = model.predict(X)
+    else:
+        print(f'Model file {model_file} does not exist...')
         
-    
     # Alter image
     for _, row in data.iterrows():
         img = annotate_contour(img, row, model_type, validation)
+        
+    # Only return state, centroid, and boundingrect
+    return_columns = ['state','cx','cy','x','y','w','h']
+    data = data.loc[data.state!='\r', return_columns]
     return img, data
     
     
@@ -254,9 +259,9 @@ class FillingValidation(BaseValidation):
             cv.setMouseCallback('zoomed', inputCallback)
         return
     
-class NonNoteValidation(BaseValidation):
+class NotationValidation(BaseValidation):
     def __init__(self, orig, line_sep):
-        BaseValidation.__init__(self, orig, line_sep, 'nonnotes')  
+        BaseValidation.__init__(self, orig, line_sep, 'notations')  
         
     def mouseCallback(self, event, x, y, flags, param):
         if event == cv.EVENT_LBUTTONDBLCLK:

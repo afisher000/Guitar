@@ -9,10 +9,10 @@ import cv2 as cv
 
 # Add 'make_copy' as possible kwarg?
 
-def get_cluster_centers(rect, img, n_clusters):
+def get_clusters(rect, img, n_clusters):
     # Ensure rect points are integers, get sub image
-    x,y,w,h = list(map(int, rect))
-    subimg = img[y:y+h, x:x+w]
+    x0,y0,w0,h0 = list(map(int, rect))
+    subimg = img[y0:y0+h0, x0:x0+w0]
     
     # Get points in clusters
     ypoints, xpoints = np.where(subimg==0)
@@ -20,10 +20,25 @@ def get_cluster_centers(rect, img, n_clusters):
     
     # Apply kmeans clustering
     criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 10, 1.0)
-    _, _, centers = cv.kmeans(points, n_clusters, None, criteria, 10, cv.KMEANS_RANDOM_CENTERS)
+    _, _, rel_centers = cv.kmeans(points, n_clusters, None, criteria, 10, cv.KMEANS_RANDOM_CENTERS)
+    centers = (rel_centers + [y0,x0]).astype(int)
     
-    # Return the centers for img
-    return centers + [y,x]
+    # Compute distances to centers
+    dists = np.zeros((points.shape[0], n_clusters))
+    for j in range(n_clusters):
+        dists[:,j] = np.linalg.norm(points-rel_centers[j,:], axis=1)
+    nearest_center = dists.argmin(axis=1) 
+    
+    # Compute rect boundary of adjacent points
+    boundingRects = []
+    for j in range(n_clusters):
+        adj_points = points[nearest_center==j, :]
+        y, x = (adj_points.min(axis=0) + [y0,x0]).astype(int)
+        h, w = adj_points.ptp(axis=0).astype(int)
+        boundingRects.append([x,y,w,h])    
+    
+    # Return the center and bounding rectangle of each cluster
+    return centers, boundingRects
 
 
 def check_rectange_overlap(rect0, rect):
@@ -31,8 +46,8 @@ def check_rectange_overlap(rect0, rect):
     x,y,w,h = rect
     
     # Check if x overlaps
-    x_not_overlap = (x+w<x0)|(x>x0+w0)
-    y_not_overlap = (y+h<y0)|(y>y0+h0)
+    x_not_overlap = (x+w<=x0)|(x>=x0+w0)
+    y_not_overlap = (y+h<=y0)|(y>=y0+h0)
     not_overlap = x_not_overlap | y_not_overlap
     overlap = ~not_overlap
     return overlap

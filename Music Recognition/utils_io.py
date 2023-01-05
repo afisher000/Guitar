@@ -60,22 +60,18 @@ def write_to_WAV(notes):
     sample_rate, guitar_note = read('guitarnote_A#.wav')
     
     # Compute time and sample_rate for notes
-    sec_per_line = 15
-    samples_per_line = sec_per_line*sample_rate
-    line_length = notes.x.max()+100
-    notes['time'] = (notes.line + notes.x/line_length)*sec_per_line
     notes['sample_rate'] = notes.pitch.apply(lambda x: sample_rate*2**((x+2)/12)).astype(int)
     
     
     # Define audio array
-    audio_length_sec = sec_per_line * (notes.line.max()+1)
-    audio_length_samples = int(audio_length_sec * sample_rate)
-    audio = np.zeros(audio_length_samples)
-    time = np.linspace(0, audio_length_sec, audio_length_samples)
+    audio_length = notes.beat.max() + 4
+    n_samples = int(audio_length * sample_rate)
+    audio = np.zeros(n_samples)
+    time = np.linspace(0, audio_length, n_samples)
     
     # Add 1 second clips for each note
     for index, row in notes.iterrows():
-        f = interp1d(row.time + np.arange(row.sample_rate)/row.sample_rate, guitar_note[:row.sample_rate], 
+        f = interp1d(row.beat + np.arange(row.sample_rate)/row.sample_rate, guitar_note[:row.sample_rate], 
         'linear', bounds_error = False, fill_value=0)
         audio += f(time)
         
