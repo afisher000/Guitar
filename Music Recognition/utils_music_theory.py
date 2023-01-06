@@ -44,7 +44,7 @@ def get_staff_pitch(y, line_sep):
     # Apply bass linear fit
     slope = -2/line_sep
     intercept = 6
-    staff_pitch = (slope*mody + intercept).astype(int)
+    staff_pitch = np.round(slope*mody + intercept).astype(int)
     
     # Shift up 12 if treble
     staff_pitch[is_treble] = staff_pitch[is_treble] + 12

@@ -22,22 +22,25 @@ import os
 import pickle
 
 # Use shapes as well as color to distinguish labels
-# If you don't clean up stems when cutting lines, you will get random measures
+# Make sure pitches are correct by applying shifts for modifiers as needed
+# No need for manually adding measures at end of line
+# Trouble shoot pitches, best to have unit test of sorts?
+
 
 staff_margin = 4
 
+# Import and clean music
 song_file = 'Songs\\flats.jpg'
 raw_music = uio.import_song(song_file)
-
-# Get line_sep and n_lines
-line_sep, n_lines = umm.get_line_data(raw_music)[2:]
-cleaned_img = umm.strip_words(raw_music.copy(), line_sep, n_lines)
-orig =  umm.equalize_music_lines(cleaned_img.copy(), margin=staff_margin)
-line_height = orig.shape[0]//n_lines
+orig, line_sep, n_lines = umm.clean_music(raw_music.copy())
+cv.imwrite('Test\\original.jpg', orig)
 
 # Fill notes and flats
 filled_img, _ = um.run_model(orig.copy(), line_sep, model_type='filling')
-fill_mask = (orig&(~filled_img))
+fill_mask = cv.bitwise_and(orig, cv.bitwise_not(filled_img))
+cv.imwrite('Test\\filled_image.jpg', filled_img)
+
+# Remove staff lines
 nostaff_img = umm.remove_staff_lines(filled_img.copy())
 cv.imwrite('Test\\no_staff.jpg', nostaff_img)
 
@@ -45,15 +48,17 @@ cv.imwrite('Test\\no_staff.jpg', nostaff_img)
 _, notations = um.run_model(nostaff_img.copy(), line_sep, 'notations')
 measures, rests, modifiers, timesig = umm.separate_notations(notations, orig.copy(), line_sep)
 
-
 # Remove notations
 no_notations_img = umm.remove_nonnotes(nostaff_img, notations, line_sep)    
 cv.imwrite('Test\\no notations.jpg', no_notations_img)
 
-# Close to remove lines, identify notes and compute tails
+
+# Close to remove lines all lines
 closed_img = uip.morphology_operation(
     no_notations_img.copy(), (.25*line_sep, .25*line_sep), cv.MORPH_CLOSE
 )
+
+# Identify notes and separate with kmeans clustering
 _, grouped_notes = um.run_model(closed_img.copy(), line_sep, 'notes')
 notes = umm.separate_grouped_notes(closed_img.copy(), grouped_notes)
 
@@ -62,8 +67,9 @@ notes = umm.compute_stems_and_tails(no_notations_img.copy(), notes, line_sep)
 notes = umm.compute_is_filled(fill_mask, notes)
 notes, keysig = umm.apply_note_modifiers(notes, modifiers, line_sep)
 notes = umm.apply_keysignature(notes, orig, keysig, measures, line_sep)
-notes['duration'] = 2**(1+notes.is_filled - notes.is_stemmed - notes.tails) * (1+0.5*notes.is_dotted)
-
+notes['duration'] = 2.0**(1+notes.is_filled - notes.is_stemmed - notes.tails) * (1+0.5*notes.is_dotted)
+notes = umm.compute_beats(notes, rests, line_sep)
+uio.write_to_WAV(notes)
 # %%
 
 def check_note_booleans(img, notes, col):
@@ -86,19 +92,16 @@ def check_note_booleans(img, notes, col):
 check_note_booleans(orig, notes, 'duration')
 
 # %%
-notes = umm.compute_beats(notes, rests, line_sep)
-uio.write_to_WAV(notes)
+
 
 # %%
-
-
 
 
     
 
 # Close image to remove lines
 # uio.show_image(no_nonnotes_img, reduce=2)
-# test = FillingValidation(orig, line_sep)
-# test = NonNoteValidation(nostaff_img, line_sep)
-# test = NoteValidation(closed_img, line_sep)
+# test = FillingValidation(orig)
+# test = NotationValidation(nostaff_img)
+# test = NoteValidation(closed_img)
 # %%

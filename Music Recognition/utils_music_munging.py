@@ -9,64 +9,64 @@ import utils_model as um
 
 
 def remove_staff_lines(img):
-     # Turn white if pixel above and below line is white
-    line_starts, line_ends, _, _ = get_line_data(img)
+     # Turn line column white if pixel above and below line is white
+    is_line = (img.sum(axis=1)/img.shape[1]) < 127
+    line_starts = np.logical_and(~is_line[:-1], is_line[1:]).nonzero()[0]+1
+    line_ends = np.logical_and(is_line[:-1], ~is_line[1:]).nonzero()[0]+1
+    
     for start, end in zip(line_starts, line_ends):
-        line_fill = (img[start,:])&(img[end+1,:])
+        line_fill = (img[start-1,:])&(img[end,:])
         img[start:end+1,:] = line_fill
     return img
 
-def get_line_data(img):
-    is_line = (img.sum(axis=1)/img.shape[1]) < 127
-    is_line_start = np.logical_and(~is_line[:-1], is_line[1:])
-    is_line_end = np.logical_and(is_line[:-1], ~is_line[1:])
-    line_starts = np.where(is_line_start)[0]
-    line_ends = np.where(is_line_end)[0]
-    line_sep = np.diff(line_starts[:5]).mean()
-    n_lines = len(line_starts)//5
-    return line_starts, line_ends, line_sep, n_lines
+    
+def clean_music(img):
+    # Compute line_sep and number of music lines
+    is_horz_line = img.sum(axis=1)/img.shape[1]<127
+    line_starts = np.logical_and(~is_horz_line[:-1], is_horz_line[1:]).nonzero()[0]
+    line_sep = int((line_starts[4]-line_starts[0])//4)
+    n_lines = int(len(line_starts)//5)
 
+    # Remove white columns and vertical line connecting treble and bass
+    is_white_col = img.sum(axis=0)/img.shape[0]==255
+    img = img[:, ~is_white_col]
+    is_vert_line = (img.sum(axis=0)/img.shape[0]) < 127
+    img[:, is_vert_line] = 255
     
-def strip_words(img, line_sep, n_lines):
-    # Remove long line connecting staff and treble
-    long_vert_lines = uip.morphology_operation(img.copy(), (10*line_sep, 1), cv.MORPH_CLOSE)
-    words_img = ~((~img)&(long_vert_lines))
-    
-    # Fill bounding rects of staff contours, then floodfill white
+    # Fill bounding rects of staff contours, then floodfill white to isolate words
+    words_img = img.copy()
     contours, _ = cv.findContours(~words_img, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
-    cs = sorted(contours, key=cv.contourArea)[::-1]
-    for c in cs[:n_lines]:
+    cs = sorted(contours, key=cv.contourArea)[-n_lines:]
+    for c in cs:
         x,y,w,h = cv.boundingRect(c)
         words_img[y:y+h, :] = 0
-        cv.floodFill(words_img, None, (int(x+w/2), int(y+h/2)), 255)
-    cleaned_img = ~((~img)&(words_img))
-    return cleaned_img
+        cv.floodFill(words_img, None, (x+w//2, y+h//2), 255)
 
-def equalize_music_lines(img, margin=4):
-    # Remove all-white columns
-    non_white_cols = img.sum(axis=0)<255*img.shape[0]
-    img = img[:, non_white_cols]
+    # Combine with original to remove words
+    no_words_img = cv.bitwise_or(
+        img,
+        cv.bitwise_not(words_img)
+    )
 
+    # Use white rows to separate staffs
+    is_white_row = no_words_img.sum(axis=1)/no_words_img.shape[1]==255
+    is_staff_start = np.logical_and(is_white_row[:-1], ~is_white_row[1:])
+    is_staff_end = np.logical_and(~is_white_row[:-1], is_white_row[1:])
+    staff_starts = np.nonzero(is_staff_start)[0]+1
+    staff_ends = np.nonzero(is_staff_end)[0]+1
+
+    # Make new image with equal height staff lines
+    line_height = 12*line_sep
+    size = (n_lines*line_height, words_img.shape[1])
+    cleaned_img = np.full(size, 255, dtype=np.uint8)
+    for j, (staff_start, staff_end) in enumerate(zip(staff_starts, staff_ends)):
+        staff_lines = is_horz_line[staff_start:staff_end].nonzero()[0]+1
+        staff_center = staff_start + int(staff_lines.sum()/len(staff_lines))
+        staff_idxs = np.arange(staff_start, staff_end)
+        cleaned_img[staff_idxs - staff_center + int((j+.5)*line_height), :] = no_words_img[staff_idxs, :]
+
+    return cleaned_img, line_sep, n_lines
     
-    # Get image for each staff
-    line_starts, line_ends, line_sep, n_lines = get_line_data(img)
-    staff_imgs = []
-    for j in range(n_lines):
-        top = int(line_starts[5*j] - margin*line_sep)
-        bottom = int(line_starts[4+5*j] + margin*line_sep)
-        left = int(3.5*line_sep)
-        right = int(-1.0*line_sep)
-        
-        # For each line, flood fill any black pixels on top/bottom edge
-        staff_img = img[top:bottom, left:right].copy()
-        # for col in range(staff_img.shape[1]):
-        #     if staff_img[-1,col]==0:
-        #         cv.floodFill(staff_img, None, (col,staff_img.shape[0]-1),255)
-        #     if staff_img[0,col]==0:
-        #         cv.floodFill(staff_img, None, (col,0),255)
-        staff_imgs.append(staff_img)
-    img = np.vstack(staff_imgs)
-    return img
 
 def compute_stems_and_tails(img, notes, line_sep):
     # Operations to isolate note stems
@@ -128,6 +128,7 @@ def separate_notations(notations, orig, line_sep):
     
     # Modifiers include accidentals and dots
     modifiers = notations.loc[notations.index.intersection(list('sfdn'))].reset_index()
+    modifiers.loc[modifiers.state=='f', 'cy'] += .3*line_sep
     
     # Time signature
     timesig = notations.loc[notations.index.intersection(list('23468'))].reset_index()
@@ -136,8 +137,9 @@ def separate_notations(notations, orig, line_sep):
 def compute_is_filled(fill_mask, notes):
     # Compute is_filled column for notes
     for index, (x,y,w,h) in notes[['x','y','w','h']].iterrows():
-        is_filled = (fill_mask[y:y+h, x:x+w].sum()>0).astype(int)
+        is_filled = int(fill_mask[y:y+h, x:x+w].sum()>0)
         notes.loc[index, 'is_filled'] = is_filled
+    notes.is_filled = notes.is_filled.astype(int)
     return notes
     
 def remove_nonnotes(img, nonnotes, line_sep):
@@ -235,6 +237,7 @@ def apply_keysignature(notes, orig, keysig, measures, line_sep):
             elif row.staff_pitch%12 in keysig_staff_pitches.keys():
                 notes.loc[index, 'pitch'] += acc_map[keysig_staff_pitches[row.staff_pitch%12]]
 
+    notes['label'] = notes.pitch.apply(lambda x: umt.get_pitch_as_string(x, keysig=-1))
     return notes
 
 def compute_beats(notes, rests, line_sep):

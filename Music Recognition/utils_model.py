@@ -94,7 +94,7 @@ def get_image_contours(img, model_type=None):
                  contours.append(c)
     return contours
     
-def run_model(img, line_sep, model_type, validation=False):
+def run_model(img, line_sep, model_type, validation=False, verbose=False):
     # Get contour data from image
     contours = get_image_contours(img.copy(), model_type)
     data = get_contour_data(contours, line_sep)
@@ -111,10 +111,11 @@ def run_model(img, line_sep, model_type, validation=False):
     # Alter image
     for _, row in data.iterrows():
         img = annotate_contour(img, row, model_type, validation)
-        
-    # Only return state, centroid, and boundingrect
-    return_columns = ['state','cx','cy','x','y','w','h']
-    data = data.loc[data.state!='\r', return_columns]
+
+    if not verbose:    
+        # Only return state, centroid, and boundingrect
+        return_columns = ['state','cx','cy','x','y','w','h']
+        data = data.loc[data.state!='\r', return_columns].reset_index(drop=True)
     return img, data
     
     
@@ -171,7 +172,7 @@ class BaseValidation():
 
         # Run model
         self.img, self.data = run_model(
-            orig.copy(), line_sep, model_type=model_type, validation=True
+            orig.copy(), line_sep, model_type=model_type, validation=True, verbose=True
         )
         
         # Main loop
@@ -207,7 +208,7 @@ class BaseValidation():
             db_data = pd.read_csv(database_file)
         else:
             db_data = pd.DataFrame(columns=data_columns)
-            
+
         db_data = pd.concat([db_data, self.data])
         db_data.to_csv(database_file, index=False)
         
@@ -267,12 +268,12 @@ class NotationValidation(BaseValidation):
         if event == cv.EVENT_LBUTTONDBLCLK:
             cv.namedWindow = 'zoomed'
             idx = np.argmin((self.data.cx-4*x)**2+(self.data.cy-4*y)**2)
-            x, y, width, height = self.data.loc[idx,['x','y','width','height']]
+            x, y, w, h = self.data.loc[idx,['x','y','w','h']]
             pad = 1
             top = int(y)-pad
-            bottom = int(y + height*self.line_sep)+pad
+            bottom = int(y + h)+pad
             left = int(x)-pad
-            right = int(x + width*self.line_sep)+pad
+            right = int(x + w)+pad
             
             # Show closeup, respond with keypress
             cv.imshow('zoomed', self.orig[top:bottom, left:right])
@@ -294,12 +295,12 @@ class NoteValidation(BaseValidation):
         if event == cv.EVENT_LBUTTONDBLCLK:
             cv.namedWindow = 'zoomed'
             idx = np.argmin((self.data.cx-4*x)**2+(self.data.cy-4*y)**2)
-            x, y, width, height = self.data.loc[idx,['x','y','width','height']]
+            x, y, w, h = self.data.loc[idx,['x','y','w','h']]
             pad = 1
             top = int(y)-pad
-            bottom = int(y + height*self.line_sep)+pad
+            bottom = int(y + h)+pad
             left = int(x)-pad
-            right = int(x + width*self.line_sep)+pad
+            right = int(x + w)+pad
             
             # Show closeup, respond with keypress
             cv.imshow('zoomed', self.orig[top:bottom, left:right])
