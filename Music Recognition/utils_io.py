@@ -58,20 +58,20 @@ def show_image(img, reduce=0):
 def write_to_WAV(notes):
     # Read files
     sample_rate, guitar_note = read('guitarnote_A#.wav')
-    
+    bps = 2
     # Compute time and sample_rate for notes
     notes['sample_rate'] = notes.pitch.apply(lambda x: sample_rate*2**((x+2)/12)).astype(int)
     
     
     # Define audio array
-    audio_length = notes.beat.max() + 4
+    audio_length = (notes.beat.max() + 4) / bps
     n_samples = int(audio_length * sample_rate)
     audio = np.zeros(n_samples)
     time = np.linspace(0, audio_length, n_samples)
     
     # Add 1 second clips for each note
     for index, row in notes.iterrows():
-        f = interp1d(row.beat + np.arange(row.sample_rate)/row.sample_rate, guitar_note[:row.sample_rate], 
+        f = interp1d(row.beat/bps + np.arange(row.sample_rate)/row.sample_rate, guitar_note[:row.sample_rate], 
         'linear', bounds_error = False, fill_value=0)
         audio += f(time)
         

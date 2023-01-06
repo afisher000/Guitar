@@ -115,8 +115,8 @@ def run_model(img, line_sep, model_type, validation=False, verbose=False):
     if not verbose:    
         # Only return state, centroid, and boundingrect
         return_columns = ['state','cx','cy','x','y','w','h']
-        data = data.loc[data.state!='\r', return_columns].reset_index(drop=True)
-    return img, data
+        data = data.loc[data.state!='\r', return_columns]
+    return img, data.reset_index(drop=True)
     
     
 def get_contour_data(contours, line_sep):
@@ -269,14 +269,9 @@ class NotationValidation(BaseValidation):
             cv.namedWindow = 'zoomed'
             idx = np.argmin((self.data.cx-4*x)**2+(self.data.cy-4*y)**2)
             x, y, w, h = self.data.loc[idx,['x','y','w','h']]
-            pad = 1
-            top = int(y)-pad
-            bottom = int(y + h)+pad
-            left = int(x)-pad
-            right = int(x + w)+pad
             
             # Show closeup, respond with keypress
-            cv.imshow('zoomed', self.orig[top:bottom, left:right])
+            cv.imshow('zoomed', self.orig[y:y+h,x:x+w])
             key = cv.waitKey(0)
             cv.destroyWindow('zoomed')
             
@@ -296,14 +291,9 @@ class NoteValidation(BaseValidation):
             cv.namedWindow = 'zoomed'
             idx = np.argmin((self.data.cx-4*x)**2+(self.data.cy-4*y)**2)
             x, y, w, h = self.data.loc[idx,['x','y','w','h']]
-            pad = 1
-            top = int(y)-pad
-            bottom = int(y + h)+pad
-            left = int(x)-pad
-            right = int(x + w)+pad
             
             # Show closeup, respond with keypress
-            cv.imshow('zoomed', self.orig[top:bottom, left:right])
+            cv.imshow('zoomed', self.orig[y:y+h,x:x+w])
             key = cv.waitKey(0)
             cv.destroyWindow('zoomed')
             

@@ -16,26 +16,28 @@ import utils_model as um
 import utils_io as uio
 import utils_music_munging as umm
 import utils_image_processing as uip
+import utils_music_theory as umt
 import cv2 as cv
 from scipy import ndimage
 import os
 import pickle
 
 # Use shapes as well as color to distinguish labels
-# Make sure pitches are correct by applying shifts for modifiers as needed
-# No need for manually adding measures at end of line
-# Trouble shoot pitches, best to have unit test of sorts?
-
+# Throw error if song file is not found
+# Dots can be above or below not (see fairest lord jesus)
+# Use flood filling to clean up edges of staff lines?
+# Staff lines still touch (see crown him with many crowns...)
 
 staff_margin = 4
 
 # Import and clean music
-song_file = 'Songs\\flats.jpg'
+song_file = 'Songs\\as_water_to_the_thirsty.pdf'
 raw_music = uio.import_song(song_file)
 orig, line_sep, n_lines = umm.clean_music(raw_music.copy())
 cv.imwrite('Test\\original.jpg', orig)
 
 # Fill notes and flats
+test = um.FillingValidation(orig, line_sep)
 filled_img, _ = um.run_model(orig.copy(), line_sep, model_type='filling')
 fill_mask = cv.bitwise_and(orig, cv.bitwise_not(filled_img))
 cv.imwrite('Test\\filled_image.jpg', filled_img)
@@ -45,6 +47,7 @@ nostaff_img = umm.remove_staff_lines(filled_img.copy())
 cv.imwrite('Test\\no_staff.jpg', nostaff_img)
 
 # Identify notations, separate into structures
+test = um.NotationValidation(nostaff_img.copy(), line_sep)
 _, notations = um.run_model(nostaff_img.copy(), line_sep, 'notations')
 measures, rests, modifiers, timesig = umm.separate_notations(notations, orig.copy(), line_sep)
 
@@ -59,6 +62,7 @@ closed_img = uip.morphology_operation(
 )
 
 # Identify notes and separate with kmeans clustering
+test = um.NoteValidation(closed_img, line_sep)
 _, grouped_notes = um.run_model(closed_img.copy(), line_sep, 'notes')
 notes = umm.separate_grouped_notes(closed_img.copy(), grouped_notes)
 
@@ -68,8 +72,12 @@ notes = umm.compute_is_filled(fill_mask, notes)
 notes, keysig = umm.apply_note_modifiers(notes, modifiers, line_sep)
 notes = umm.apply_keysignature(notes, orig, keysig, measures, line_sep)
 notes['duration'] = 2.0**(1+notes.is_filled - notes.is_stemmed - notes.tails) * (1+0.5*notes.is_dotted)
+rests = pd.DataFrame(columns = ['state','cx','cy','x','y','w','h','total_pixel','duration'])
 notes = umm.compute_beats(notes, rests, line_sep)
 uio.write_to_WAV(notes)
+
+notes = notes.sort_values(by=['beat','pitch']).reset_index(drop=True)
+
 # %%
 
 def check_note_booleans(img, notes, col):
@@ -91,17 +99,4 @@ def check_note_booleans(img, notes, col):
     return
 check_note_booleans(orig, notes, 'duration')
 
-# %%
-
-
-# %%
-
-
-    
-
-# Close image to remove lines
-# uio.show_image(no_nonnotes_img, reduce=2)
-# test = FillingValidation(orig)
-# test = NotationValidation(nostaff_img)
-# test = NoteValidation(closed_img)
 # %%

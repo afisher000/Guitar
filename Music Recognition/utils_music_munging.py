@@ -6,6 +6,7 @@ import pickle
 import utils_image_processing as uip
 import utils_music_theory as umt
 import utils_model as um
+import utils_io as uio
 
 
 def remove_staff_lines(img):
@@ -30,9 +31,10 @@ def clean_music(img):
     # Remove white columns and vertical line connecting treble and bass
     is_white_col = img.sum(axis=0)/img.shape[0]==255
     img = img[:, ~is_white_col]
-    is_vert_line = (img.sum(axis=0)/img.shape[0]) < 127
+    is_vert_line = (img.sum(axis=0)/img.shape[0]) < 170
     img[:, is_vert_line] = 255
-    
+
+
     # Fill bounding rects of staff contours, then floodfill white to isolate words
     words_img = img.copy()
     contours, _ = cv.findContours(~words_img, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
@@ -47,6 +49,7 @@ def clean_music(img):
         img,
         cv.bitwise_not(words_img)
     )
+    cv.imwrite('Test\\no_words.jpg', no_words_img)
 
     # Use white rows to separate staffs
     is_white_row = no_words_img.sum(axis=1)/no_words_img.shape[1]==255
@@ -62,6 +65,7 @@ def clean_music(img):
     for j, (staff_start, staff_end) in enumerate(zip(staff_starts, staff_ends)):
         staff_lines = is_horz_line[staff_start:staff_end].nonzero()[0]+1
         staff_center = staff_start + int(staff_lines.sum()/len(staff_lines))
+        print(staff_center)
         staff_idxs = np.arange(staff_start, staff_end)
         cleaned_img[staff_idxs - staff_center + int((j+.5)*line_height), :] = no_words_img[staff_idxs, :]
 
@@ -108,18 +112,8 @@ def separate_notations(notations, orig, line_sep):
     # Reset state as index
     notations = notations.set_index('state')
     
-    # Get measures, create measures for end-of-line
+    # Get measures
     measures = notations.loc['m'].reset_index()
-    n_lines = round(orig.shape[0]/(12*line_sep))
-    
-    cx = orig.shape[1]    
-    cy = (np.arange(n_lines)+.5)*(12*line_sep)
-    end_of_line_measures = pd.DataFrame(columns = ['state','cx','cy'])
-    end_of_line_measures['state'] = 'm'
-    end_of_line_measures['cx'] = cx
-    end_of_line_measures['cy'] = cy 
-    measures = pd.concat([measures, end_of_line_measures]).reset_index(drop=True)
-
 
     # Get rests, add time column based on state
     rest_duration_map = {'q':.25, 'w':.5, 'e':1, 'r':2, 't':4}
@@ -206,9 +200,9 @@ def apply_keysignature(notes, orig, keysig, measures, line_sep):
     # Initialize key signals and dictionary maps
     acc_map = {'s':1, 'f':-1, 'n':0}
     acc_staff_pitches = {}
-    keysig_staff_pitches = {}
-    for staff_pitch in umt.get_staff_pitch(keysig.cy.values, line_sep):
-        keysig_staff_pitches[staff_pitch] = keysig.loc[0, 'state']
+    keysig_pitches = {}
+    for pitch in umt.get_pitch(keysig.cy.values, line_sep):
+        keysig_pitches[pitch%12] = keysig.loc[0, 'state']
     
     notes['staff_pitch'] = umt.get_staff_pitch(notes.cy.values, line_sep)
     notes['pitch'] = umt.get_pitch(notes.cy.values, line_sep)
@@ -229,13 +223,13 @@ def apply_keysignature(notes, orig, keysig, measures, line_sep):
             elif row.is_naturaled:
                 acc_staff_pitches[row.staff_pitch] = 'n'
             
-            # Check if in accidentals
-            elif row.staff_pitch%12 in acc_staff_pitches.keys():
-                notes.loc[index, 'pitch'] += acc_map[acc_staff_pitches[row.staff_pitch%12]]
+            # Check if in accidentals (must be exact line)
+            elif row.staff_pitch in acc_staff_pitches.keys():
+                notes.loc[index, 'pitch'] += acc_map[acc_staff_pitches[row.staff_pitch]]
             
             # Check if in keysig
-            elif row.staff_pitch%12 in keysig_staff_pitches.keys():
-                notes.loc[index, 'pitch'] += acc_map[keysig_staff_pitches[row.staff_pitch%12]]
+            elif row.pitch%12 in keysig_pitches.keys():
+                notes.loc[index, 'pitch'] += acc_map[keysig_pitches[row.pitch%12]]
 
     notes['label'] = notes.pitch.apply(lambda x: umt.get_pitch_as_string(x, keysig=-1))
     return notes
