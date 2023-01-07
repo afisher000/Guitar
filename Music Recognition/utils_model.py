@@ -16,7 +16,7 @@ training_columns = [
     'area','width','height','aspectratio','extent','solidity','angle'
     ]
 data_columns = [
-        'state', 'cx', 'cy','area', 'x','y','w','h','width',
+        'tag', 'cx', 'cy','area', 'x','y','w','h','width',
         'height','aspectratio','extent','solidity', 'angle'
     ]
 
@@ -59,18 +59,18 @@ note_colors = {
 
 def annotate_contour(img, row, model_type, validation=False):
     if model_type == 'filling':
-        if row.state!='\r':
+        if chr(row.tag)!='\r':
             fill_value = 100 if validation else 0
             cv.floodFill(img, None, (int(row.cx), int(row.cy)), fill_value)
     elif model_type == 'notations':
         if len(img.shape)==2: #Is grayscale
             img = cv.cvtColor(img, cv.COLOR_GRAY2BGR)
-        color = notation_colors[row.state]
+        color = notation_colors[chr(row.tag)]
         cv.circle(img, (int(row.cx), int(row.cy)), radius=15, color=color, thickness=-1)
     elif model_type == 'notes':
         if len(img.shape)==2: #Is grayscale
             img = cv.cvtColor(img, cv.COLOR_GRAY2BGR)
-        color = note_colors[row.state]
+        color = note_colors[chr(row.tag)]
         cv.circle(img, (int(row.cx), int(row.cy)), radius=15, color=color, thickness=-1)  
     return img
 
@@ -106,7 +106,7 @@ def run_model(img, model_type, validation=False, verbose=False):
     if os.path.exists(model_file):
         model = pickle.load(open(model_file, 'rb'))
         X = data[training_columns].values
-        data.state = model.predict(X)
+        data.tag = model.predict(X)
     else:
         print(f'Model file {model_file} does not exist...')
         
@@ -115,9 +115,9 @@ def run_model(img, model_type, validation=False, verbose=False):
         img = annotate_contour(img, row, model_type, validation)
 
     if not verbose:    
-        # Only return state, centroid, and boundingrect
-        return_columns = ['state','cx','cy','x','y','w','h']
-        data = data.loc[data.state!='\r', return_columns]
+        # Only return tag, centroid, and boundingrect
+        return_columns = ['tag','cx','cy','x','y','w','h']
+        data = data.loc[chr(data.tag)!='\r', return_columns]
     return img, data.reset_index(drop=True)
     
     
@@ -138,6 +138,8 @@ def get_contour_data(contours):
         x,y,w,h = cv.boundingRect(c)
         if area<50:
             continue
+        if area>(8*line_sep)**2:
+            continue
         
         hull = cv.convexHull(c)
         hull_area = cv.contourArea(hull)
@@ -145,7 +147,12 @@ def get_contour_data(contours):
             _,(MA,ma),angle = cv.fitEllipse(c)
         except:
             MA, ma, angle = 0, 0, 0
-        
+
+        # Ratios
+        aspect_ratio = float(w)/h
+        extent = float(area)/(w*h)
+        solidity = float(area)/hull_area
+
         # Normalize
         area = area/line_sep**2
         hull_area = hull_area/line_sep**2
@@ -154,15 +161,9 @@ def get_contour_data(contours):
         width = w/line_sep
         height = h/line_sep
         
-        # Ratios
-        aspect_ratio = float(w)/h
-        extent = float(area)/(w*h)
-        solidity = float(area)/hull_area
-
-        
         # Append to dataframe
         contour_df.loc[len(contour_df)] = [
-            '\r', cx, cy, area, x,y,w,h,width, height, 
+            13, cx, cy, area, x,y,w,h,width, height, 
             aspect_ratio, extent, solidity, angle
         ]
 
@@ -215,7 +216,7 @@ class BaseValidation():
         db_data = pd.concat([db_data, self.data])
         db_data.to_csv(database_file, index=False)
         
-        y = db_data.state
+        y = db_data.tag
         X = db_data[training_columns].values
         model = RandomForestClassifier()
         model.fit(X,y)
@@ -251,10 +252,10 @@ class FillingValidation(BaseValidation):
 
                     if self.img[cy,cx]==255:
                         fill_value = 100
-                        self.data.loc[idx, 'state'] = '1'
+                        self.data.loc[idx, 'tag'] = ord('1')
                     elif self.img[cy,cx]==100:
                         fill_value = 255
-                        self.data.loc[idx, 'state'] = '\r'
+                        self.data.loc[idx, 'tag'] = ord('\r')
                     else:
                         fill_value = 0
                     cv.floodFill(self.img, None, (cx,cy), fill_value)
@@ -280,7 +281,7 @@ class NotationValidation(BaseValidation):
             
             # Update color label
             if key in list(map(ord, 'sfnmd23468qwert\r')):
-                self.data.loc[idx, 'state'] = chr(key)
+                self.data.loc[idx, 'tag'] = key
                 annotate_contour(self.img, self.data.loc[idx], model_type=self.model_type)
         return
     
@@ -302,6 +303,6 @@ class NoteValidation(BaseValidation):
             
             # Update color label
             if key in list(map(ord, '1234\r')):
-                self.data.loc[idx, 'state'] = chr(key)
+                self.data.loc[idx, 'tag'] = key
                 annotate_contour(self.img, self.data.loc[idx], model_type=self.model_type)
         return

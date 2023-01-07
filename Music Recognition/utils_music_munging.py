@@ -26,30 +26,24 @@ def clean_music(img):
         ['line_sep','n_lines','line_height']
     )
     
-    # Compute staff_centers
+    # Compute center of staffs
     is_horz_line = img.sum(axis=1)/img.shape[1]<127
     line_starts = np.logical_and(~is_horz_line[:-1], is_horz_line[1:]).nonzero()[0]+1
     line_ends = np.logical_and(is_horz_line[:-1], ~is_horz_line[1:]).nonzero()[0]+1
     staff_centers = (line_starts[0::5]/2 + line_ends[4::5]/2).astype(int)
 
-
-    # Remove white columns and vertical line connecting treble and bass
+    # Remove white columns and vertical line that would connect treble and bass
     is_white_col = img.sum(axis=0)/img.shape[0]==255
     img = img[:, ~is_white_col]
     is_vert_line = (img.sum(axis=0)/img.shape[0]) < 170
     img[:, is_vert_line] = 255
 
-
     # Fill bounding rects of staff contours, then floodfill white to isolate words
     words_img = img.copy()
     contours, _ = cv.findContours(~words_img, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
     cs = sorted(contours, key=cv.contourArea)[-n_lines:]
-    ys = []
-    hs = []
     for c in cs:
         x,y,w,h = cv.boundingRect(c)
-        hs.append(h)
-        ys.append(y)
         words_img[y:y+h, :] = 0
         cv.floodFill(words_img, None, (x+w//2, y+h//2), 255)
 
@@ -61,26 +55,23 @@ def clean_music(img):
     cv.imwrite('Test\\no_words.jpg', no_words_img)
 
 
-    # Make new image with equal height staff lines
+    # Add contours onto new image with equal line heights
     size = (n_lines*line_height, words_img.shape[1])
     cleaned_img = np.full(size, 255, dtype=np.uint8)
     cs, hs = cv.findContours(~no_words_img, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
     for c in cs:
         x,y,w,h = cv.boundingRect(c)
+
+        # Compute line based on centroid 
         line = np.abs((y+h//2)-staff_centers).argmin(axis=0)
         
-        # Make mask of contour
-        mask = np.zeros(img.shape, np.uint8)
-        cv.drawContours(mask, cs, -1, 255, -1)
-        only_contour = ~((~img)&mask)
+        # Update new image
+        row_shift = int((line+0.5)*line_height) - staff_centers[line]
+        rows = np.s_[y:y+h]
+        dest_rows = np.s_[y+row_shift: y+h+row_shift]
+        cols = np.s_[x:x+w]
+        cleaned_img[dest_rows,cols] = no_words_img[rows,cols]
         
-        # Add to new image
-        target_center = int((line+0.5)*line_height)
-        current_center = staff_centers[line]
-        row_idxs = np.arange(y, y+h)
-        
-        cleaned_img[row_idxs - current_center + target_center] = only_contour[row_idxs]
-
     return cleaned_img
     
 
@@ -95,7 +86,7 @@ def compute_stems_and_tails(img, notes):
         stems, (.25*line_sep, .25*line_sep), cv.MORPH_ERODE
     )
     stem_contours, _ = cv.findContours(~dilated_stems, cv.RETR_CCOMP, cv.CHAIN_APPROX_SIMPLE)
-    notes = notes[notes.state!='\r']
+    notes = notes[chr(notes.tag)!='\r']
     notes[['tails', 'is_stemmed']] = 0
     for c in stem_contours:
         x,y,w,h = cv.boundingRect(c)
@@ -134,29 +125,29 @@ def separate_notations(notations, orig):
     line_sep, line_height = uio.get_song_params(['line_sep', 'line_height'])
     notations['total_pixel'] = notations.cx + notations.cy//(2*line_height)*orig.shape[1]
     
-    # Reset state as index
-    notations = notations.set_index('state')
+    # Reset tag as index
+    notations = notations.set_index('tag')
     
     # Get measures
     measures = notations.loc['m'].reset_index()
 
-    # Get rests, add time column based on state
+    # Get rests, add time column based on tag
     rest_duration_map = {'q':.25, 'w':.5, 'e':1, 'r':2, 't':4}
     rests = notations.loc[notations.index.intersection(list('qwert'))].reset_index()
-    rests['duration'] = rests.state.map(rest_duration_map)
+    rests['duration'] = rests.tag.apply(chr).map(rest_duration_map)
     
     # Get accidentals
     accs = notations.loc[notations.index.intersection(list('sfn'))].reset_index()
-    accs.loc[accs.state=='f', 'cy'] += .3*line_sep
+    accs.loc[chr(accs.tag)=='f', 'cy'] += .3*line_sep
     
     # Get dots
     dots = notations.loc['d'].reset_index()
     
     # Time signature
-    numbers = notations.loc[notations.index.intersection(list('23468'))].sort_values(by='cy').reset_index()
+    numbers = notations.loc[notations.index.intersection(map(chr,list('23468')))].sort_values(by='cy').reset_index()
     timesig = {}
-    timesig['beats'] = numbers.loc[0, 'state']
-    timesig['duration'] = numbers.loc[1, 'state']
+    timesig['beats'] = numbers.loc[0, 'tag']
+    timesig['duration'] = numbers.loc[1, 'tag']
     
     # Key signature
     keysig = {}
@@ -165,7 +156,7 @@ def separate_notations(notations, orig):
         accs.cy < line_height
     )
     keysig['pitches'] = umt.get_pitch(accs[is_keysig].cy.astype(float).values)%12
-    keysig['acc'] = 's' if 's' in accs[is_keysig].state.values else 'f'
+    keysig['acc'] = 's' if 's' in accs[is_keysig].tag.apply(chr).values else 'f'
     return measures, rests, accs, dots, timesig, keysig
 
 def compute_is_filled(fill_mask, notes):
@@ -178,7 +169,7 @@ def compute_is_filled(fill_mask, notes):
     
 def remove_nonnotes(img, nonnotes):
     for _, row in nonnotes.iterrows():
-        if row.state!='\r':
+        if chr(row.tag)!='\r':
             x,y,w,h = row[['x','y','w','h']]
             cv.rectangle(img, (x,y), (x+w,y+h), 255, -1)
     return img
@@ -208,7 +199,7 @@ def apply_accidentals(notes, accs):
         
         acc_idx = accs.index[is_valid_acc].values
         if len(acc_idx)==1:
-            key = accs.loc[acc_idx[0], 'state']
+            key = accs.loc[acc_idx[0], 'tag']
             notes.loc[index, column_dict[key]] = 1
         elif len(acc_idx)>1:
             print('More than 1 accidental nearby! Skipping note')
@@ -247,11 +238,11 @@ def apply_dots(notes, dots):
         
 def separate_grouped_notes(closed_img, grouped_notes):
     # Create new structure than contains correct centroid and bounding rects for notes
-    notes = grouped_notes[grouped_notes.state=='1'].copy().reset_index(drop=True)
+    notes = grouped_notes[grouped_notes.tag.apply(chr)=='1'].copy().reset_index(drop=True)
     for index, row in grouped_notes.iterrows():
-        if row.state in '234':
+        if chr(row.tag) in '234':
             rect = row[['x','y','w','h']].to_list()
-            n_clusters = int(row.state)
+            n_clusters = int(chr(row.tag))
             centers, bounding_rects = uip.get_clusters(rect, closed_img, n_clusters)
             for center, bounding_rect in zip(centers, bounding_rects):
                 notes.loc[len(notes)] = ['1', center[1], center[0], *bounding_rect] 
@@ -270,7 +261,7 @@ def apply_keysignature(notes, orig, keysig, measures):
     
     for index, row in pd.concat([notes, measures]).sort_values(by='total_pixel').iterrows():
         # Reset accidentals for new measure
-        if row.state=='m':
+        if chr(row.tag)=='m':
             acc_staff_pitches = {}
         else:
             # Check for accidentals
@@ -311,7 +302,7 @@ def compute_beats_old(notes, rests):
         end_beats.remove(min_end_beat)
         end_beats.update(min_end_beat + np.unique(durations))
     
-    notes = notes_and_rests[notes_and_rests.state=='1']
+    notes = notes_and_rests[notes_and_rests.tag.apply(chr)=='1']
     return notes
 
 def compute_beats(notes, rests):
@@ -365,6 +356,6 @@ def compute_beats(notes, rests):
             # Add to chord
             idxs.append(j)
     # Return notes
-    notes = notes_and_rests[notes_and_rests.state=='1']
+    notes = notes_and_rests[notes_and_rests.tag.apply(chr)=='1']
     return notes
 

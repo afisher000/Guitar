@@ -25,16 +25,23 @@ import pickle
 # How to train better, more variety (make database?)
 # General clean up/organization
     # Can we have entire data dataframes be integer type
+# Once I build up large enough datasets, I can optimize the machine learning models
+
+validate = True
 
 # Import and clean music
-song_file = 'Songs\\in_the_garden.pdf'
+song_file = 'Songs\\as_water_to_the_thirsty.jpg'
 raw_music = uio.import_song(song_file)
 uio.save_song_params(raw_music)
 orig = umm.clean_music(raw_music.copy())
 cv.imwrite('Test\\original.jpg', orig)
 
+# %%
 # Fill notes and flats
-test = um.FillingValidation(orig)
+if validate:
+    um.FillingValidation(orig)
+
+#%%
 filled_img, _ = um.run_model(orig.copy(), model_type='filling')
 fill_mask = cv.bitwise_and(orig, cv.bitwise_not(filled_img))
 cv.imwrite('Test\\filled_image.jpg', filled_img)
@@ -44,7 +51,8 @@ nostaff_img = umm.remove_staff_lines(filled_img.copy())
 cv.imwrite('Test\\no_staff.jpg', nostaff_img)
 
 # Identify notations, separate into structures
-test = um.NotationValidation(nostaff_img.copy())
+if validate:
+    um.NotationValidation(nostaff_img.copy())
 _, notations = um.run_model(nostaff_img.copy(), 'notations')
 measures, rests, accs, dots, timesig, keysig = umm.separate_notations(notations, orig.copy())
 
@@ -60,7 +68,8 @@ closed_img = uip.morphology_operation(
 )
 
 # Identify notes and separate with kmeans clustering
-test = um.NoteValidation(closed_img)
+if validate:
+    um.NoteValidation(closed_img)
 _, grouped_notes = um.run_model(closed_img.copy(), 'notes')
 notes = umm.separate_grouped_notes(closed_img.copy(), grouped_notes)
 
@@ -74,6 +83,7 @@ notes = umm.apply_dots(notes, dots)
 notes['duration'] = 2.0**(1+notes.is_filled - notes.is_stemmed - notes.tails) * (1+0.5*notes.is_dotted)
 
 # %%
+# Compute beats and write to wav file
 notes = umm.compute_beats(notes, rests)
 uio.write_to_WAV(notes)
 
