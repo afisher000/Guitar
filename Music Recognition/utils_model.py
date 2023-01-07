@@ -10,6 +10,7 @@ import pandas as pd
 import numpy as np
 import os
 from sklearn.ensemble import RandomForestClassifier
+import utils_io as uio
 
 training_columns = [
     'area','width','height','aspectratio','extent','solidity','angle'
@@ -94,10 +95,11 @@ def get_image_contours(img, model_type=None):
                  contours.append(c)
     return contours
     
-def run_model(img, line_sep, model_type, validation=False, verbose=False):
+def run_model(img, model_type, validation=False, verbose=False):
+    
     # Get contour data from image
     contours = get_image_contours(img.copy(), model_type)
-    data = get_contour_data(contours, line_sep)
+    data = get_contour_data(contours)
     
     # Apply model if exists
     model_file = model_files[model_type]
@@ -119,7 +121,9 @@ def run_model(img, line_sep, model_type, validation=False, verbose=False):
     return img, data.reset_index(drop=True)
     
     
-def get_contour_data(contours, line_sep):
+def get_contour_data(contours):
+    line_sep = uio.get_song_params(['line_sep'])
+    
     contour_df = pd.DataFrame(columns=data_columns)
     for c in contours:
         # Faults can arise when m00=0 or len(c)<4 and ellipse cannot be fit.
@@ -165,14 +169,13 @@ def get_contour_data(contours, line_sep):
     return contour_df
     
 class BaseValidation():
-    def __init__(self, orig, line_sep, model_type):
+    def __init__(self, orig, model_type):
         self.orig = orig
-        self.line_sep = line_sep
         self.model_type = model_type
 
         # Run model
         self.img, self.data = run_model(
-            orig.copy(), line_sep, model_type=model_type, validation=True, verbose=True
+            orig.copy(), model_type=model_type, validation=True, verbose=True
         )
         
         # Main loop
@@ -222,8 +225,8 @@ class BaseValidation():
     
 
 class FillingValidation(BaseValidation):
-    def __init__(self, orig, line_sep):
-        BaseValidation.__init__(self, orig, line_sep, 'filling')
+    def __init__(self, orig):
+        BaseValidation.__init__(self, orig, 'filling')
         
     def mouseCallback(self, event, x, y, flags, param):
         # Fill or unfill contour
@@ -261,8 +264,8 @@ class FillingValidation(BaseValidation):
         return
     
 class NotationValidation(BaseValidation):
-    def __init__(self, orig, line_sep):
-        BaseValidation.__init__(self, orig, line_sep, 'notations')  
+    def __init__(self, orig):
+        BaseValidation.__init__(self, orig, 'notations')  
         
     def mouseCallback(self, event, x, y, flags, param):
         if event == cv.EVENT_LBUTTONDBLCLK:
@@ -283,8 +286,8 @@ class NotationValidation(BaseValidation):
     
     
 class NoteValidation(BaseValidation):
-    def __init__(self, orig, line_sep):
-        BaseValidation.__init__(self, orig, line_sep, 'notes')  
+    def __init__(self, orig):
+        BaseValidation.__init__(self, orig, 'notes')  
 
     def mouseCallback(self, event, x, y, flags, param):
         if event == cv.EVENT_LBUTTONDBLCLK:

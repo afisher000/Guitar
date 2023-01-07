@@ -22,11 +22,16 @@ def remove_staff_lines(img):
 
     
 def clean_music(img):
-    # Compute line_sep and number of music lines
+    line_sep, n_lines, line_height = uio.get_song_params(
+        ['line_sep','n_lines','line_height']
+    )
+    
+    # Compute staff_centers
     is_horz_line = img.sum(axis=1)/img.shape[1]<127
-    line_starts = np.logical_and(~is_horz_line[:-1], is_horz_line[1:]).nonzero()[0]
-    line_sep = int((line_starts[4]-line_starts[0])//4)
-    n_lines = int(len(line_starts)//5)
+    line_starts = np.logical_and(~is_horz_line[:-1], is_horz_line[1:]).nonzero()[0]+1
+    line_ends = np.logical_and(is_horz_line[:-1], ~is_horz_line[1:]).nonzero()[0]+1
+    staff_centers = (line_starts[0::5]/2 + line_ends[4::5]/2).astype(int)
+
 
     # Remove white columns and vertical line connecting treble and bass
     is_white_col = img.sum(axis=0)/img.shape[0]==255
@@ -39,8 +44,12 @@ def clean_music(img):
     words_img = img.copy()
     contours, _ = cv.findContours(~words_img, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
     cs = sorted(contours, key=cv.contourArea)[-n_lines:]
+    ys = []
+    hs = []
     for c in cs:
         x,y,w,h = cv.boundingRect(c)
+        hs.append(h)
+        ys.append(y)
         words_img[y:y+h, :] = 0
         cv.floodFill(words_img, None, (x+w//2, y+h//2), 255)
 
@@ -51,28 +60,33 @@ def clean_music(img):
     )
     cv.imwrite('Test\\no_words.jpg', no_words_img)
 
-    # Use white rows to separate staffs
-    is_white_row = no_words_img.sum(axis=1)/no_words_img.shape[1]==255
-    is_staff_start = np.logical_and(is_white_row[:-1], ~is_white_row[1:])
-    is_staff_end = np.logical_and(~is_white_row[:-1], is_white_row[1:])
-    staff_starts = np.nonzero(is_staff_start)[0]+1
-    staff_ends = np.nonzero(is_staff_end)[0]+1
 
     # Make new image with equal height staff lines
-    line_height = 12*line_sep
     size = (n_lines*line_height, words_img.shape[1])
     cleaned_img = np.full(size, 255, dtype=np.uint8)
-    for j, (staff_start, staff_end) in enumerate(zip(staff_starts, staff_ends)):
-        staff_lines = is_horz_line[staff_start:staff_end].nonzero()[0]+1
-        staff_center = staff_start + int(staff_lines.sum()/len(staff_lines))
-        print(staff_center)
-        staff_idxs = np.arange(staff_start, staff_end)
-        cleaned_img[staff_idxs - staff_center + int((j+.5)*line_height), :] = no_words_img[staff_idxs, :]
+    cs, hs = cv.findContours(~no_words_img, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+    for c in cs:
+        x,y,w,h = cv.boundingRect(c)
+        line = np.abs((y+h//2)-staff_centers).argmin(axis=0)
+        
+        # Make mask of contour
+        mask = np.zeros(img.shape, np.uint8)
+        cv.drawContours(mask, cs, -1, 255, -1)
+        only_contour = ~((~img)&mask)
+        
+        # Add to new image
+        target_center = int((line+0.5)*line_height)
+        current_center = staff_centers[line]
+        row_idxs = np.arange(y, y+h)
+        
+        cleaned_img[row_idxs - current_center + target_center] = only_contour[row_idxs]
 
-    return cleaned_img, line_sep, n_lines
+    return cleaned_img
     
 
-def compute_stems_and_tails(img, notes, line_sep):
+def compute_stems_and_tails(img, notes):
+    line_sep = uio.get_song_params(['line_sep'])
+    
     # Operations to isolate note stems
     no_stems = uip.morphology_operation(img, (.25*line_sep, .25*line_sep), cv.MORPH_DILATE)
     hollowed_notes = ~((~img)&(no_stems))
@@ -85,7 +99,7 @@ def compute_stems_and_tails(img, notes, line_sep):
     notes[['tails', 'is_stemmed']] = 0
     for c in stem_contours:
         x,y,w,h = cv.boundingRect(c)
-        is_overlapping = uip.check_rectange_overlap(
+        is_overlapping = uip.check_rectangle_overlap(
             (x,y,w,h), (notes.x,notes.y,notes.w,notes.h)
         )
     
@@ -96,8 +110,19 @@ def compute_stems_and_tails(img, notes, line_sep):
         y_idx = y_idx[(y_idx<ymin)|(y_idx>ymax)]
         left_column = img[y_idx, x]
         right_column = img[y_idx, x+w]
-        left_tails = len(np.diff(left_column).nonzero()[0])//2
-        right_tails = len(np.diff(right_column).nonzero()[0])//2
+        def count_tails(arr):
+            is_white = True
+            tails = 0
+            for val in arr:
+                if val==0 and is_white:
+                    tails += 1
+                    is_white = False
+                elif val!=0 and not is_white:
+                    is_white = True
+            return tails
+        left_tails = count_tails(left_column)
+        right_tails = count_tails(right_column)
+
         tails = max(left_tails, right_tails)
         notes.loc[is_overlapping, ['tails']] = tails
         notes.loc[is_overlapping, ['is_stemmed']] = 1
@@ -105,9 +130,9 @@ def compute_stems_and_tails(img, notes, line_sep):
     return notes
 
 
-def separate_notations(notations, orig, line_sep):
-    # 
-    notations['total_pixel'] = notations.cx + notations.cy//(24*line_sep)*orig.shape[1]
+def separate_notations(notations, orig):
+    line_sep, line_height = uio.get_song_params(['line_sep', 'line_height'])
+    notations['total_pixel'] = notations.cx + notations.cy//(2*line_height)*orig.shape[1]
     
     # Reset state as index
     notations = notations.set_index('state')
@@ -120,13 +145,28 @@ def separate_notations(notations, orig, line_sep):
     rests = notations.loc[notations.index.intersection(list('qwert'))].reset_index()
     rests['duration'] = rests.state.map(rest_duration_map)
     
-    # Modifiers include accidentals and dots
-    modifiers = notations.loc[notations.index.intersection(list('sfdn'))].reset_index()
-    modifiers.loc[modifiers.state=='f', 'cy'] += .3*line_sep
+    # Get accidentals
+    accs = notations.loc[notations.index.intersection(list('sfn'))].reset_index()
+    accs.loc[accs.state=='f', 'cy'] += .3*line_sep
+    
+    # Get dots
+    dots = notations.loc['d'].reset_index()
     
     # Time signature
-    timesig = notations.loc[notations.index.intersection(list('23468'))].reset_index()
-    return measures, rests, modifiers, timesig
+    numbers = notations.loc[notations.index.intersection(list('23468'))].sort_values(by='cy').reset_index()
+    timesig = {}
+    timesig['beats'] = numbers.loc[0, 'state']
+    timesig['duration'] = numbers.loc[1, 'state']
+    
+    # Key signature
+    keysig = {}
+    is_keysig = np.logical_and(
+        accs.total_pixel < numbers.total_pixel.mean(),
+        accs.cy < line_height
+    )
+    keysig['pitches'] = umt.get_pitch(accs[is_keysig].cy.astype(float).values)%12
+    keysig['acc'] = 's' if 's' in accs[is_keysig].state.values else 'f'
+    return measures, rests, accs, dots, timesig, keysig
 
 def compute_is_filled(fill_mask, notes):
     # Compute is_filled column for notes
@@ -136,7 +176,7 @@ def compute_is_filled(fill_mask, notes):
     notes.is_filled = notes.is_filled.astype(int)
     return notes
     
-def remove_nonnotes(img, nonnotes, line_sep):
+def remove_nonnotes(img, nonnotes):
     for _, row in nonnotes.iterrows():
         if row.state!='\r':
             x,y,w,h = row[['x','y','w','h']]
@@ -144,44 +184,66 @@ def remove_nonnotes(img, nonnotes, line_sep):
     return img
 
 
-def apply_note_modifiers(notes, modifiers, line_sep):
-    # Drop dots by 1/4 of line sep
-    modifiers.loc[modifiers.state=='d', 'cy'] += 0.25*line_sep
-    
+def apply_accidentals(notes, accs):    
+    line_sep = uio.get_song_params(['line_sep'])
     # Apply accidentals to closest note
     notes = notes.reset_index(drop=True)
     column_dict = {
         's':'is_sharped',
         'f':'is_flatted',
         'n':'is_naturaled',
-        'd':'is_dotted'
     }
     for col in column_dict.values():
         notes[col] = 0
     
-    keysig_idxs = []
-    for index, row in modifiers.iterrows():
-        dists = np.abs(row[['cx','cy']] - notes[['cx','cy']]).values
-        is_valid_note = np.logical_and(
-            dists[:,1]<0.5*line_sep,
-            dists[:,0]<3*line_sep
+    
+    for index, row in notes.iterrows():
+        dists = row[['cx','cy']] - accs[['cx','cy']]
+        
+        # Check for valid accidentals
+        is_valid_acc = np.logical_and(
+            dists.cx.between(0, 3*line_sep),
+            dists.cy.abs()<0.25*line_sep,
         )
-        if sum(is_valid_note)>1:
-            print('Found two notes that are sufficiently close to modifer!')
-        elif sum(is_valid_note)==1:
-            note_idx = np.where(is_valid_note)[0]
-            notes.loc[note_idx, column_dict[row.state]] = 1
-        else:
-            if row.state in 'sf':
-                keysig_idxs.append(index)
-    
-    keysig = modifiers.loc[keysig_idxs]
-    if len(keysig.state.unique())>1:
-        raise ValueError('Multiple accidental types in key signature')
-    
-    # Detect treble clef keysig
-    keysig = keysig[keysig.cy<12*line_sep].reset_index(drop=True)
-    return notes, keysig   
+        
+        acc_idx = accs.index[is_valid_acc].values
+        if len(acc_idx)==1:
+            key = accs.loc[acc_idx[0], 'state']
+            notes.loc[index, column_dict[key]] = 1
+        elif len(acc_idx)>1:
+            print('More than 1 accidental nearby! Skipping note')
+
+
+    return notes
+
+def apply_dots(notes, dots):
+    line_sep = uio.get_song_params(['line_sep'])
+    notes = notes.reset_index(drop=True)
+    notes['is_dotted'] = 0
+
+    for index, row in notes.iterrows():
+        dot_dists = row[['cx','cy']] - dots[['cx','cy']]
+
+        # Apply dots
+        is_close = np.logical_and(
+            dot_dists.cx.between(-3*line_sep, 0),
+            dot_dists.cy.abs()<0.75*line_sep
+        )
+        
+        if is_close.sum()>1:
+            notes.loc[index, 'is_dotted'] = 1
+        elif is_close.sum()==1:
+            # Make sure no note same pitch before dot
+            dot_dist = dot_dists[is_close].values[0]
+            note_dists = row[['cx','cy']] - notes[['cx','cy']]
+            is_note_between = np.logical_and(
+                note_dists.cx.between(dot_dist[0], -1),
+                note_dists.cy.between(dot_dist[1]-.25*line_sep, dot_dist[1]+.25*line_sep)
+            )
+            if is_note_between.sum()==0:
+                notes.loc[index, 'is_dotted'] = 1
+
+    return notes
         
 def separate_grouped_notes(closed_img, grouped_notes):
     # Create new structure than contains correct centroid and bounding rects for notes
@@ -196,17 +258,15 @@ def separate_grouped_notes(closed_img, grouped_notes):
     return notes
 
 
-def apply_keysignature(notes, orig, keysig, measures, line_sep):
+def apply_keysignature(notes, orig, keysig, measures):
+    line_height = uio.get_song_params(['line_height'])
     # Initialize key signals and dictionary maps
     acc_map = {'s':1, 'f':-1, 'n':0}
     acc_staff_pitches = {}
-    keysig_pitches = {}
-    for pitch in umt.get_pitch(keysig.cy.values, line_sep):
-        keysig_pitches[pitch%12] = keysig.loc[0, 'state']
     
-    notes['staff_pitch'] = umt.get_staff_pitch(notes.cy.values, line_sep)
-    notes['pitch'] = umt.get_pitch(notes.cy.values, line_sep)
-    notes['total_pixel'] = notes.cx + notes.cy//(24*line_sep)*orig.shape[1]
+    notes['staff_pitch'] = umt.get_staff_pitch(notes.cy.astype(float).values)
+    notes['pitch'] = umt.get_pitch(notes.cy.astype(float).values)
+    notes['total_pixel'] = (notes.cx + notes.cy//(2*line_height)*orig.shape[1]).astype(float)
     
     for index, row in pd.concat([notes, measures]).sort_values(by='total_pixel').iterrows():
         # Reset accidentals for new measure
@@ -228,31 +288,83 @@ def apply_keysignature(notes, orig, keysig, measures, line_sep):
                 notes.loc[index, 'pitch'] += acc_map[acc_staff_pitches[row.staff_pitch]]
             
             # Check if in keysig
-            elif row.pitch%12 in keysig_pitches.keys():
-                notes.loc[index, 'pitch'] += acc_map[keysig_pitches[row.pitch%12]]
-
-    notes['label'] = notes.pitch.apply(lambda x: umt.get_pitch_as_string(x, keysig=-1))
+            elif row.pitch%12 in keysig['pitches']:
+                notes.loc[index, 'pitch'] += acc_map[keysig['acc']]
+    notes['label'] = notes.pitch.apply(lambda x: umt.get_pitch_as_string(x, keysig_acc=keysig['acc']))
     return notes
 
-def compute_beats(notes, rests, line_sep):
+def compute_beats_old(notes, rests):
+    line_sep = uio.get_song_params(['line_sep'])
     notes_and_rests = pd.concat([notes, rests]).sort_values(by='total_pixel').reset_index(drop=True)
     
     end_beats = {0}
     chord_idxs = np.hstack([
         -1, 
-        np.where(np.diff(notes_and_rests.total_pixel.values)>1.5*line_sep)[0],
+        np.where(np.diff(notes_and_rests.total_pixel.values)>1.4*line_sep)[0],
         len(notes_and_rests)
     ])
     for j in range(len(chord_idxs)-1):
         min_end_beat = min(end_beats)
-        
         durations = notes_and_rests.loc[chord_idxs[j]+1:chord_idxs[j+1], 'duration']
         notes_and_rests.loc[chord_idxs[j]+1:chord_idxs[j+1],'beat'] = min_end_beat
-        
         
         end_beats.remove(min_end_beat)
         end_beats.update(min_end_beat + np.unique(durations))
     
+    notes = notes_and_rests[notes_and_rests.state=='1']
+    return notes
+
+def compute_beats(notes, rests):
+    line_sep = uio.get_song_params(['line_sep'])
+    notes_and_rests = pd.concat([notes, rests]).sort_values(by='total_pixel').reset_index(drop=True)
+    
+    
+    
+    def check_chord_overlap(j, idxs):
+        rect0 = notes_and_rests.loc[j, ['x','y','w','h']]
+        for idx in idxs:
+            rect = notes_and_rests.loc[idx, ['x','y','w','h']]
+            if uip.check_rectangle_overlap(rect0, rect):
+                return True
+        return False
+        
+    beats = {0}
+    dpixels = .5*line_sep
+    idxs = []
+    pixels = notes_and_rests.total_pixel.values
+    pixel_limit = pixels[0]+dpixels
+    chord_counter = 0
+    for j, pixel in enumerate(pixels):
+        if pixel>pixel_limit:
+            is_overlapping = np.logical_or(
+                check_chord_overlap(j, idxs), #current with last chord
+                check_chord_overlap(j-1, range(j,j+4)) #previous with next chord
+            )
+            if not is_overlapping:
+                # Assign chord and beat, update beats set
+                min_beat = min(beats)
+                notes_and_rests.loc[idxs, 'beat'] = min_beat
+                notes_and_rests.loc[idxs, 'chord'] = chord_counter
+                durations = notes_and_rests.loc[idxs, 'duration']
+                beats.remove(min_beat)
+                beats.update(min_beat + np.unique(durations))
+                
+                idxs = [j]
+                pixel_limit = pixel + dpixels
+                chord_counter += 1
+            else:
+                # Update pixel limit, add to chord
+                pixel_limit = pixel + dpixels
+                idxs.append(j)
+        elif j+1==len(pixels):
+            # If last note, assign chord and beat
+            idxs.append(j)
+            notes_and_rests.loc[idxs, 'beat'] = min(beats)
+            notes_and_rests.loc[idxs, 'chord'] = chord_counter
+        else:
+            # Add to chord
+            idxs.append(j)
+    # Return notes
     notes = notes_and_rests[notes_and_rests.state=='1']
     return notes
 

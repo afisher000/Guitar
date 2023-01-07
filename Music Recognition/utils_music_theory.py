@@ -12,12 +12,13 @@ import numbers
 import cv2 as cv
 import utils_io as uio
 
-def get_pitch_as_string(pitch, keysig='sharp'):
+
+def get_pitch_as_string(pitch, keysig_acc='s'):
     # Check if numeric
-    if isinstance(keysig, numbers.Number):
-        keysig = 'sharp' if keysig>=0 else 'flat'
+    if isinstance(keysig_acc, numbers.Number):
+        keysig_acc = 's' if keysig_acc>=0 else 'f'
         
-    if keysig=='sharp':
+    if keysig_acc=='sharp':
         note_strings = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']
     else:
         note_strings = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B']
@@ -26,25 +27,25 @@ def get_pitch_as_string(pitch, keysig='sharp'):
     return note_string
     
 
-def get_pitch(y, line_sep):
+def get_pitch(y):
+    line_sep = uio.get_song_params(['line_sep'])
     semitone_mapping = pd.Series(
         index=range(7),
         data=[0,2,4,5,7,9,11]
     )
-    staff_pitch = get_staff_pitch(y, line_sep)
+    staff_pitch = get_staff_pitch(y)
     pitch = semitone_mapping[staff_pitch%7].values + 12*(staff_pitch//7)
     return pitch
     
-def get_staff_pitch(y, line_sep):
-    ''' ASSUMES MARGIN IS 4!!!!'''
-    line_height = 12*line_sep
+def get_staff_pitch(y):
+    line_sep, line_height, margin = uio.get_song_params(['line_sep','line_height', 'margin'])
     is_treble = (y//line_height)%2==0
     mody = y%line_height
     
     # Apply bass linear fit
     slope = -2/line_sep
-    intercept = 6
-    staff_pitch = np.round(slope*mody + intercept).astype(int)
+    intercept = -2 + (2*margin)
+    staff_pitch =np.round(slope*mody + intercept).astype(int)
     
     # Shift up 12 if treble
     staff_pitch[is_treble] = staff_pitch[is_treble] + 12
@@ -91,7 +92,8 @@ def get_chord_string(pitches):
                 return chord_string
     return '?'
     
-def annotate_chords(img, notes, line_height):
+def annotate_chords(img, notes):
+    line_sep, line_height = uio.get_song_params(['line_sep', 'line_height'])
     # Get keysig
     keysig = 'sharp' if notes.string.str.contains('#').sum()>0 else 'flat'
     

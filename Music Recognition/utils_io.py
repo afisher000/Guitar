@@ -3,6 +3,10 @@ import numpy as np
 import cv2 as cv
 from scipy.io.wavfile import read, write
 from scipy.interpolate import interp1d
+import os
+import pandas as pd
+
+song_parameter_file = 'song_params.csv'
 
 def convert_to_jpg(file):
     # If already jpg, return
@@ -27,6 +31,9 @@ def pdf2jpg(file, dest=None):
     return
 
 def import_song(song_file):
+    if not os.path.exists(song_file):
+        raise ValueError('Song file not found.')
+        
     if song_file.endswith('pdf'):
         pdf2jpg(song_file)
         song_file = song_file[:-4] + '.jpg'
@@ -39,6 +46,35 @@ def import_song(song_file):
     _, binary_img = cv.threshold(grayscale_img, threshold, max_val, min_val)
     return binary_img
 
+def save_song_params(img):
+    # Get data from image
+    is_line = img.sum(axis=1)/img.shape[1]<127
+    line_starts = np.logical_and(~is_line[:-1], is_line[1:]).nonzero()[0]+1
+    line_ends = np.logical_and(is_line[:-1], ~is_line[1:]).nonzero()[0]+1
+    line_sep = int((line_starts[4]-line_starts[0])//4)
+    n_lines = int(len(line_starts)//5)
+    line_thickness = (line_ends-line_starts).max()
+
+    # Save to file
+    params = pd.Series()
+    params['line_sep'] = line_sep
+    params['n_lines'] = n_lines
+    params['line_thickness'] = line_thickness
+    params['margin'] = 5
+    params['line_height'] = (4+2*params.margin)*params.line_sep
+    params.to_csv(song_parameter_file)
+    return
+
+def get_song_params(names):
+    params = pd.read_csv(song_parameter_file, index_col=0).squeeze()
+    if isinstance(names, list):
+        if len(names)==1:
+            return params[names].values[0]
+        else:
+            return params[names].values
+    else:
+        return params[names]
+        
 
 def show_image(img, reduce=0):
     temp = img.copy()

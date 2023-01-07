@@ -41,7 +41,7 @@ def get_clusters(rect, img, n_clusters):
     return centers, boundingRects
 
 
-def check_rectange_overlap(rect0, rect):
+def check_rectangle_overlap(rect0, rect):
     x0,y0,w0,h0 = rect0
     x,y,w,h = rect
     
@@ -49,7 +49,7 @@ def check_rectange_overlap(rect0, rect):
     x_not_overlap = (x+w<=x0)|(x>=x0+w0)
     y_not_overlap = (y+h<=y0)|(y>=y0+h0)
     not_overlap = x_not_overlap | y_not_overlap
-    overlap = ~not_overlap
+    overlap = np.logical_not(not_overlap)
     return overlap
 
 def morphology_operation(img, element, operation):
