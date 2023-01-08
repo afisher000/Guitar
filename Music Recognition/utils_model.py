@@ -61,17 +61,18 @@ def annotate_contour(img, row, model_type, validation=False):
     if model_type == 'filling':
         if chr(row.tag)!='\r':
             fill_value = 100 if validation else 0
-            cv.floodFill(img, None, (int(row.cx), int(row.cy)), fill_value)
+            cv.floodFill(img, None, (row.cx, row.cy), fill_value)
     elif model_type == 'notations':
+        #If grayscale, convert to color
         if len(img.shape)==2: #Is grayscale
             img = cv.cvtColor(img, cv.COLOR_GRAY2BGR)
         color = notation_colors[chr(row.tag)]
-        cv.circle(img, (int(row.cx), int(row.cy)), radius=15, color=color, thickness=-1)
+        cv.circle(img, (row.cx, row.cy), radius=15, color=color, thickness=-1)
     elif model_type == 'notes':
         if len(img.shape)==2: #Is grayscale
             img = cv.cvtColor(img, cv.COLOR_GRAY2BGR)
         color = note_colors[chr(row.tag)]
-        cv.circle(img, (int(row.cx), int(row.cy)), radius=15, color=color, thickness=-1)  
+        cv.circle(img, (row.cx, row.cy), radius=15, color=color, thickness=-1)  
     return img
 
 
@@ -96,35 +97,40 @@ def get_image_contours(img, model_type=None):
     return contours
     
 def run_model(img, model_type, validation=False, verbose=False):
-    
     # Get contour data from image
     contours = get_image_contours(img.copy(), model_type)
-    data = get_contour_data(contours)
-    
+    data = get_contour_data(contours).reset_index(drop=True)
+
     # Apply model if exists
     model_file = model_files[model_type]
     if os.path.exists(model_file):
         model = pickle.load(open(model_file, 'rb'))
         X = data[training_columns].values
-        data.tag = model.predict(X)
+        data.tag = model.predict(X).astype(int)
+        # if data.tag.dtype=='O':
+            # data.tag = data.tag.apply(ord)
     else:
         print(f'Model file {model_file} does not exist...')
+    
+    # Convert columns to integers
+    int_cols = ['tag','cx','cy','x','y','w','h']
+    data[int_cols] = data[int_cols].astype(int)
         
     # Alter image
-    for _, row in data.iterrows():
+    for row in data.itertuples():
         img = annotate_contour(img, row, model_type, validation)
 
     if not verbose:    
         # Only return tag, centroid, and boundingrect
-        return_columns = ['tag','cx','cy','x','y','w','h']
-        data = data.loc[chr(data.tag)!='\r', return_columns]
-    return img, data.reset_index(drop=True)
+        data = data.loc[data.tag.apply(chr)!='\r', int_cols]
+    return img, data
     
     
 def get_contour_data(contours):
     line_sep = uio.get_song_params(['line_sep'])
-    
-    contour_df = pd.DataFrame(columns=data_columns)
+
+    cxs, cys, areas, xs, ys, ws, hs, widths, heights = [], [], [], [], [], [], [], [], []
+    aspect_ratios, extents, solidities, angles, tags = [], [], [], [], []
     for c in contours:
         # Faults can arise when m00=0 or len(c)<4 and ellipse cannot be fit.
         try:
@@ -161,12 +167,31 @@ def get_contour_data(contours):
         width = w/line_sep
         height = h/line_sep
         
-        # Append to dataframe
-        contour_df.loc[len(contour_df)] = [
-            13, cx, cy, area, x,y,w,h,width, height, 
-            aspect_ratio, extent, solidity, angle
-        ]
+        # # Append to lists
+        cxs.append(cx)
+        cys.append(cy)
+        areas.append(area)
+        xs.append(x)
+        ys.append(y)
+        ws.append(w)
+        hs.append(h)
+        widths.append(width)
+        heights.append(height)
+        aspect_ratios.append(aspect_ratio)
+        extents.append(extent)
+        solidities.append(solidity)
+        angles.append(angle)
+        tags.append(13)
 
+    # Create dataframe
+    contour_df = pd.DataFrame(
+        data = np.vstack([
+            tags, cxs, cys, areas, xs, ys, ws, hs, widths, heights, 
+            aspect_ratios, extents, solidities, angles
+        ]).T,
+        columns=data_columns
+    )
+    
     return contour_df
     
 class BaseValidation():
@@ -233,6 +258,7 @@ class FillingValidation(BaseValidation):
         # Fill or unfill contour
         if event == cv.EVENT_LBUTTONDBLCLK:
             cv.namedWindow='zoomed'
+            # CLEAN
             padh = 500
             padv = 200
             top = max(0, 4*y-padv)
@@ -248,7 +274,8 @@ class FillingValidation(BaseValidation):
                     y += top
 
                     idx = np.argmin((self.data.cx-x)**2+(self.data.cy-y)**2)
-                    cx, cy = self.data.loc[idx, ['cx','cy']]
+                    cx = self.data.loc[idx, 'cx']
+                    cy = self.data.loc[idx, 'cy']
 
                     if self.img[cy,cx]==255:
                         fill_value = 100
@@ -272,7 +299,7 @@ class NotationValidation(BaseValidation):
         if event == cv.EVENT_LBUTTONDBLCLK:
             cv.namedWindow = 'zoomed'
             idx = np.argmin((self.data.cx-4*x)**2+(self.data.cy-4*y)**2)
-            x, y, w, h = self.data.loc[idx,['x','y','w','h']]
+            x, y, w, h = self.data.loc[idx,['x','y','w','h']].astype(int)
             
             # Show closeup, respond with keypress
             cv.imshow('zoomed', self.orig[y:y+h,x:x+w])
@@ -282,7 +309,7 @@ class NotationValidation(BaseValidation):
             # Update color label
             if key in list(map(ord, 'sfnmd23468qwert\r')):
                 self.data.loc[idx, 'tag'] = key
-                annotate_contour(self.img, self.data.loc[idx], model_type=self.model_type)
+                annotate_contour(self.img, self.data.loc[idx].astype(int), model_type=self.model_type)
         return
     
     
@@ -294,7 +321,7 @@ class NoteValidation(BaseValidation):
         if event == cv.EVENT_LBUTTONDBLCLK:
             cv.namedWindow = 'zoomed'
             idx = np.argmin((self.data.cx-4*x)**2+(self.data.cy-4*y)**2)
-            x, y, w, h = self.data.loc[idx,['x','y','w','h']]
+            x, y, w, h = self.data.loc[idx,['x','y','w','h']].astype(int)
             
             # Show closeup, respond with keypress
             cv.imshow('zoomed', self.orig[y:y+h,x:x+w])
@@ -304,5 +331,5 @@ class NoteValidation(BaseValidation):
             # Update color label
             if key in list(map(ord, '1234\r')):
                 self.data.loc[idx, 'tag'] = key
-                annotate_contour(self.img, self.data.loc[idx], model_type=self.model_type)
+                annotate_contour(self.img, self.data.loc[idx].astype(int), model_type=self.model_type)
         return

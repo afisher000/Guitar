@@ -42,7 +42,7 @@ def import_song(song_file):
     grayscale_img = cv.imread(song_file, cv.IMREAD_GRAYSCALE)
     
     # Threshold to black and white
-    max_val, min_val, threshold = 255, 0, 127
+    max_val, min_val, threshold = 255, 0, 200
     _, binary_img = cv.threshold(grayscale_img, threshold, max_val, min_val)
     return binary_img
 

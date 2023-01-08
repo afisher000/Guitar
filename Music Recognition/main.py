@@ -26,25 +26,25 @@ import pickle
 # General clean up/organization
     # Can we have entire data dataframes be integer type
 # Once I build up large enough datasets, I can optimize the machine learning models
+# Handle multiple page pdfs
+# Noisy pdfs?
 
 validate = True
 
 # Import and clean music
-song_file = 'Songs\\as_water_to_the_thirsty.jpg'
+song_file = 'Songs\\joy_to_the_world.pdf'
 raw_music = uio.import_song(song_file)
+cv.imwrite('Test\\raw music.jpg',raw_music)
 uio.save_song_params(raw_music)
 orig = umm.clean_music(raw_music.copy())
 cv.imwrite('Test\\original.jpg', orig)
 
-# %%
 # Fill notes and flats
 if validate:
     um.FillingValidation(orig)
-
-#%%
 filled_img, _ = um.run_model(orig.copy(), model_type='filling')
-fill_mask = cv.bitwise_and(orig, cv.bitwise_not(filled_img))
 cv.imwrite('Test\\filled_image.jpg', filled_img)
+#%%
 
 # Remove staff lines
 nostaff_img = umm.remove_staff_lines(filled_img.copy())
@@ -54,12 +54,11 @@ cv.imwrite('Test\\no_staff.jpg', nostaff_img)
 if validate:
     um.NotationValidation(nostaff_img.copy())
 _, notations = um.run_model(nostaff_img.copy(), 'notations')
-measures, rests, accs, dots, timesig, keysig = umm.separate_notations(notations, orig.copy())
+measures, rests, accs, dots = umm.separate_notations(notations, orig.copy())
 
 # Remove notations
 no_notations_img = umm.remove_nonnotes(nostaff_img, notations)    
 cv.imwrite('Test\\no notations.jpg', no_notations_img)
-
 
 # Close to remove lines all lines
 line_sep = uio.get_song_params(['line_sep'])
@@ -76,9 +75,9 @@ notes = umm.separate_grouped_notes(closed_img.copy(), grouped_notes)
 # %%
 # Perform computations on notes
 notes = umm.compute_stems_and_tails(no_notations_img.copy(), notes)
-notes = umm.compute_is_filled(fill_mask, notes)
+notes = umm.compute_is_filled(orig.copy(), filled_img, notes)
 notes = umm.apply_accidentals(notes, accs)
-notes = umm.apply_keysignature(notes, orig, keysig, measures)
+notes, keysig = umm.apply_keysignature(notes, orig.copy(), accs, measures)
 notes = umm.apply_dots(notes, dots)
 notes['duration'] = 2.0**(1+notes.is_filled - notes.is_stemmed - notes.tails) * (1+0.5*notes.is_dotted)
 
@@ -87,31 +86,37 @@ notes['duration'] = 2.0**(1+notes.is_filled - notes.is_stemmed - notes.tails) * 
 notes = umm.compute_beats(notes, rests)
 uio.write_to_WAV(notes)
 
-notes = notes.sort_values(by=['beat','pitch']).reset_index(drop=True)
+# notes = notes.sort_values(by=['beat','pitch']).reset_index(drop=True)
 
 # %%
 
 def check_note_booleans(img, notes, col):
     color_img = cv.cvtColor(orig, cv.COLOR_GRAY2BGR)
     mcolors = [(0,0,255),(0,255,0),(255,0,0)]
-    for index, row in notes.iterrows():
-        x,y,w,h = row[['x','y','w','h']]
+    for row in notes.itertuples():
+        x,y,w,h = row.x, row.y, row.w, row.h
+        col_val = int(getattr(row, col))
         if col.startswith('is_'):
-            cv.rectangle(color_img, (x,y), (x+w,y+h), mcolors[int(row[col])], 5)
+            cv.rectangle(color_img, (x,y), (x+w,y+h), mcolors[col_val], 5)
         elif col=='duration':
-            scale = round(np.log(row.duration/4)/np.log(0.5)*255/3)
-            color = (0, 255-scale, scale)
-            cv.rectangle(color_img, (x,y), (x+w,y+h), color, 5)
+            if row.duration==0.25 or row.duration==2:
+                cv.rectangle(color_img, (x,y), (x+w,y+h), (0,0,255), 5)
+            if row.duration==0.5 or row.duration==4:
+                cv.rectangle(color_img, (x,y), (x+w,y+h), (0,255,0), 5)
+            if row.duration==1:
+                cv.rectangle(color_img, (x,y), (x+w,y+h), (255,0,0), 5)
+            
         elif col=='tails':
-            cv.rectangle(color_img, (x,y), (x+w,y+h), mcolors[int(row[col])],5)
+            cv.rectangle(color_img, (x,y), (x+w,y+h), mcolors[col_val],5)
         elif col=='chord':
-            cv.rectangle(color_img, (x,y), (x+w,y+h), mcolors[int(row[col]%3)], 5)
+            cv.rectangle(color_img, (x,y), (x+w,y+h), mcolors[col_val%3], 5)
 
         # cv.rectangle(color_img, (x,y), (x+w,y+h), mcolors[int(row.is_filled)], 5)
         # cv.circle(color_img, (x+w//2,y+h//2), 10, mcolors[row.tails], thickness=-1)
         
     uio.show_image(color_img, reduce=2)
     return
-check_note_booleans(orig, notes, 'chord')
-
+check_note_booleans(orig, notes, 'tails')
+chords_img = umt.annotate_chords(orig.copy(), notes.copy(), keysig['acc'])
+cv.imwrite('Test//chords.jpg', chords_img)
 # %%
